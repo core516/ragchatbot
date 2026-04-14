@@ -12,17 +12,25 @@ class RAGSystem:
     
     def __init__(self, config):
         self.config = config
-        
+
         # Initialize core components
         self.document_processor = DocumentProcessor(config.CHUNK_SIZE, config.CHUNK_OVERLAP)
         self.vector_store = VectorStore(config.CHROMA_PATH, config.EMBEDDING_MODEL, config.MAX_RESULTS)
-        self.ai_generator = AIGenerator(config.ANTHROPIC_API_KEY, config.ANTHROPIC_MODEL)
+        self.ai_generator = AIGenerator(
+            config.ANTHROPIC_API_KEY,
+            config.ANTHROPIC_MODEL,
+            config.ANTHROPIC_BASE_URL
+        )
         self.session_manager = SessionManager(config.MAX_HISTORY)
-        
+
         # Initialize search tools
         self.tool_manager = ToolManager()
         self.search_tool = CourseSearchTool(self.vector_store)
         self.tool_manager.register_tool(self.search_tool)
+
+        # Response cache: lowercase query -> (answer, sources)
+        self._response_cache = {}
+        self._cache_max_size = 100
     
     def add_course_document(self, file_path: str) -> Tuple[Course, int]:
         """
@@ -101,43 +109,84 @@ class RAGSystem:
     
     def query(self, query: str, session_id: Optional[str] = None) -> Tuple[str, List[str]]:
         """
-        Process a user query using the RAG system with tool-based search.
-        
+        Process a user query using search-first RAG approach.
+
+        Searches the vector store first, then calls the LLM with context in a single API call.
+        This eliminates the previous two-call pattern (tool_use -> tool_result -> final).
+
         Args:
             query: User's question
             session_id: Optional session ID for conversation context
-            
+
         Returns:
-            Tuple of (response, sources list - empty for tool-based approach)
+            Tuple of (response, sources list)
         """
-        # Create prompt for the AI with clear instructions
-        prompt = f"""Answer this question about course materials: {query}"""
-        
-        # Get conversation history if session exists
+        # Check response cache
+        cache_key = query.strip().lower()
+        if cache_key in self._response_cache:
+            print(f"DEBUG: Cache hit for query: {cache_key[:50]}...")
+            return self._response_cache[cache_key]
+
+        # Step 1: Search for relevant context first
+        results = self.vector_store.search(query=query)
+
+        # Format search results as context and extract sources
+        context = ""
+        sources = []
+        if not results.is_empty():
+            context, sources = self._format_search_results(results)
+
+        # Step 2: Get conversation history
         history = None
         if session_id:
             history = self.session_manager.get_conversation_history(session_id)
-        
-        # Generate response using AI with tools
-        response = self.ai_generator.generate_response(
-            query=prompt,
-            conversation_history=history,
-            tools=self.tool_manager.get_tool_definitions(),
-            tool_manager=self.tool_manager
-        )
-        
-        # Get sources from the search tool
-        sources = self.tool_manager.get_last_sources()
 
-        # Reset sources after retrieving them
-        self.tool_manager.reset_sources()
-        
+        # Step 3: Generate response with context in a single API call
+        response = self.ai_generator.generate_response_with_context(
+            query=query,
+            context=context,
+            conversation_history=history
+        )
+
         # Update conversation history
         if session_id:
             self.session_manager.add_exchange(session_id, query, response)
-        
-        # Return response with sources from tool searches
+
+        # Cache the result
+        if len(self._response_cache) >= self._cache_max_size:
+            self._response_cache.pop(next(iter(self._response_cache)))
+        self._response_cache[cache_key] = (response, sources)
+
         return response, sources
+
+    def _format_search_results(self, results) -> Tuple[str, List[str]]:
+        """Format search results into context string and sources list."""
+        context_parts = []
+        sources = []
+
+        for doc, meta in zip(results.documents, results.metadata):
+            course_title = meta.get('course_title', 'unknown')
+            lesson_num = meta.get('lesson_number')
+
+            # Build context header
+            header = f"[{course_title}"
+            if lesson_num is not None:
+                header += f" - Lesson {lesson_num}"
+            header += "]"
+
+            context_parts.append(f"{header}\n{doc}")
+
+            # Build source with embedded link
+            source = course_title
+            if lesson_num is not None:
+                source += f" - Lesson {lesson_num}"
+                lesson_link = self.vector_store.get_lesson_link(course_title, lesson_num)
+                if lesson_link:
+                    source = f"{source}|||{lesson_link}"
+
+            sources.append(source)
+
+        return "\n\n".join(context_parts), sources
     
     def get_course_analytics(self) -> Dict:
         """Get analytics about the course catalog"""

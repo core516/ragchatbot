@@ -1,16 +1,19 @@
 import os
 from dataclasses import dataclass
 from dotenv import load_dotenv
+from pathlib import Path
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from .env file (look in parent directory)
+env_path = Path(__file__).parent.parent / ".env"
+load_dotenv(env_path)
 
 @dataclass
 class Config:
     """Configuration settings for the RAG system"""
     # Anthropic API settings
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
-    ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
+    ANTHROPIC_BASE_URL: str = os.getenv("ANTHROPIC_BASE_URL", None)
+    ANTHROPIC_MODEL: str = os.getenv("ANTHROPIC_MODEL", "glm-5")
     
     # Embedding model settings
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"

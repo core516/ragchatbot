@@ -100,10 +100,17 @@ class CourseSearchTool(Tool):
                 header += f" - Lesson {lesson_num}"
             header += "]"
             
-            # Track source for the UI
+            # Build source with embedded link
             source = course_title
             if lesson_num is not None:
                 source += f" - Lesson {lesson_num}"
+
+            # Get lesson link and embed it invisibly using delimiter
+            if lesson_num is not None:
+                lesson_link = self.store.get_lesson_link(course_title, lesson_num)
+                if lesson_link:
+                    source = f"{source}|||{lesson_link}"
+
             sources.append(source)
             
             formatted.append(f"{header}\n{doc}")

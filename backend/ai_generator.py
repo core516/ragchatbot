@@ -29,10 +29,10 @@ All responses must be:
 Provide only the direct answer to what was asked.
 """
     
-    def __init__(self, api_key: str, model: str):
-        self.client = anthropic.Anthropic(api_key=api_key)
+    def __init__(self, api_key: str, model: str, base_url: Optional[str] = None):
+        self.client = anthropic.Anthropic(api_key=api_key, base_url=base_url)
         self.model = model
-        
+
         # Pre-build base API parameters
         self.base_params = {
             "model": self.model,
@@ -77,15 +77,106 @@ Provide only the direct answer to what was asked.
             api_params["tool_choice"] = {"type": "auto"}
         
         # Get response from Claude
+        print(f"DEBUG: Calling API with model={self.model}")
+        print(f"DEBUG: api_params model={api_params.get('model')}")
+        print(f"DEBUG: base_params model={self.base_params.get('model')}")
         response = self.client.messages.create(**api_params)
         
         # Handle tool execution if needed
         if response.stop_reason == "tool_use" and tool_manager:
             return self._handle_tool_execution(response, api_params, tool_manager)
         
-        # Return direct response
-        return response.content[0].text
+        # Return direct response - skip non-text blocks (e.g. thinking blocks)
+        for block in response.content:
+            if hasattr(block, 'text') and block.text:
+                return block.text
+        return ""
     
+    def generate_response_with_context(self, query: str, context: str,
+                                        conversation_history: Optional[str] = None) -> str:
+        """
+        Generate response using pre-retrieved context in a single API call.
+
+        Args:
+            query: The user's question
+            context: Pre-formatted context from vector search
+            conversation_history: Previous messages for context
+
+        Returns:
+            Generated response as string
+        """
+        # Build system prompt
+        system_content = (
+            f"{self.SYSTEM_PROMPT}\n\nPrevious conversation:\n{conversation_history}"
+            if conversation_history
+            else self.SYSTEM_PROMPT
+        )
+
+        # Prepend context to user query
+        if context:
+            user_message = f"Context:\n{context}\n\nQuestion: {query}"
+        else:
+            user_message = query
+
+        api_params = {
+            **self.base_params,
+            "messages": [{"role": "user", "content": user_message}],
+            "system": system_content
+        }
+
+        print(f"DEBUG: Calling API with model={self.model}")
+        try:
+            response = self.client.messages.create(**api_params)
+        except Exception as e:
+            error_type = type(e).__name__
+            raise RuntimeError(f"LLM API error ({error_type}): {e}") from e
+
+        for block in response.content:
+            if hasattr(block, 'text') and block.text:
+                return block.text
+        return ""
+
+    def generate_streaming_with_context(self, query: str, context: str,
+                                         conversation_history: Optional[str] = None):
+        """
+        Generate response with streaming. Yields text chunks as they arrive.
+
+        Args:
+            query: The user's question
+            context: Pre-formatted context from vector search
+            conversation_history: Previous messages for context
+
+        Yields:
+            Text chunks from the generated response
+        """
+        # Build system prompt
+        system_content = (
+            f"{self.SYSTEM_PROMPT}\n\nPrevious conversation:\n{conversation_history}"
+            if conversation_history
+            else self.SYSTEM_PROMPT
+        )
+
+        # Prepend context to user query
+        if context:
+            user_message = f"Context:\n{context}\n\nQuestion: {query}"
+        else:
+            user_message = query
+
+        api_params = {
+            **self.base_params,
+            "messages": [{"role": "user", "content": user_message}],
+            "system": system_content
+        }
+
+        print(f"DEBUG: Streaming API call with model={self.model}")
+        try:
+            with self.client.messages.stream(**api_params) as stream:
+                for text_chunk in stream.text_stream:
+                    yield text_chunk
+        except Exception as e:
+            error_type = type(e).__name__
+            raise RuntimeError(f"LLM streaming error ({error_type}): {e}") from e
+
     def _handle_tool_execution(self, initial_response, base_params: Dict[str, Any], tool_manager):
         """
         Handle execution of tool calls and get follow-up response.
@@ -130,6 +221,9 @@ Provide only the direct answer to what was asked.
             "system": base_params["system"]
         }
         
-        # Get final response
+        # Get final response - skip thinking blocks
         final_response = self.client.messages.create(**final_params)
-        return final_response.content[0].text
+        for block in final_response.content:
+            if hasattr(block, 'text') and block.text:
+                return block.text
+        return ""

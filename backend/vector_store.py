@@ -50,6 +50,10 @@ class VectorStore:
         # Create collections for different types of data
         self.course_catalog = self._create_collection("course_catalog")  # Course titles/instructors
         self.course_content = self._create_collection("course_content")  # Actual course material
+
+        # In-memory course title cache for fast resolution
+        self._course_title_cache = {}
+        self._build_course_title_index()
     
     def _create_collection(self, name: str):
         """Create or get a ChromaDB collection"""
@@ -58,6 +62,18 @@ class VectorStore:
             embedding_function=self.embedding_function
         )
     
+    def _build_course_title_index(self):
+        """Load all course titles into memory for fast exact/prefix matching."""
+        try:
+            results = self.course_catalog.get()
+            if results and 'metadatas' in results:
+                for meta in results['metadatas']:
+                    title = meta.get('title', '')
+                    if title:
+                        self._course_title_cache[title.lower()] = title
+        except Exception as e:
+            print(f"Error building course title index: {e}")
+
     def search(self, 
                query: str,
                course_name: Optional[str] = None,
@@ -100,19 +116,34 @@ class VectorStore:
             return SearchResults.empty(f"Search error: {str(e)}")
     
     def _resolve_course_name(self, course_name: str) -> Optional[str]:
-        """Use vector search to find best matching course by name"""
+        """Try exact/case-insensitive match first, fall back to vector search."""
+        # Fast path: exact or case-insensitive match
+        direct = self._course_title_cache.get(course_name.lower())
+        if direct:
+            return direct
+
+        # Fuzzy substring: check if any title contains the query
+        for key, title in self._course_title_cache.items():
+            if course_name.lower() in key:
+                return title
+
+        # Fallback: vector search for semantic matching
+        return self._resolve_course_name_vector(course_name)
+
+    def _resolve_course_name_vector(self, course_name: str) -> Optional[str]:
+        """Vector-based course name resolution (slow path)."""
         try:
             results = self.course_catalog.query(
                 query_texts=[course_name],
                 n_results=1
             )
-            
+
             if results['documents'][0] and results['metadatas'][0]:
                 # Return the title (which is now the ID)
                 return results['metadatas'][0][0]['title']
         except Exception as e:
             print(f"Error resolving course name: {e}")
-        
+
         return None
     
     def _build_filter(self, course_title: Optional[str], lesson_number: Optional[int]) -> Optional[Dict]:
@@ -158,6 +189,8 @@ class VectorStore:
             }],
             ids=[course.title]
         )
+        # Update the in-memory cache
+        self._course_title_cache[course.title.lower()] = course.title
     
     def add_course_content(self, chunks: List[CourseChunk]):
         """Add course content chunks to the vector store"""

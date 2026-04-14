@@ -54,17 +54,18 @@ async function sendMessage() {
     // Add user message
     addMessage(query, 'user');
 
-    // Add loading message - create a unique container for it
-    const loadingMessage = createLoadingMessage();
-    chatMessages.appendChild(loadingMessage);
+    // Create a streaming message container
+    const messageDiv = createStreamingAssistantMessage();
+    chatMessages.appendChild(messageDiv);
     chatMessages.scrollTop = chatMessages.scrollHeight;
 
+    let fullAnswer = '';
+    let pendingSources = [];
+
     try {
-        const response = await fetch(`${API_URL}/query`, {
+        const response = await fetch(`${API_URL}/query/stream`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 query: query,
                 session_id: currentSessionId
@@ -73,21 +74,45 @@ async function sendMessage() {
 
         if (!response.ok) throw new Error('Query failed');
 
-        const data = await response.json();
-        
-        // Update session ID if new
-        if (!currentSessionId) {
-            currentSessionId = data.session_id;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // Keep incomplete line in buffer
+
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                const event = JSON.parse(line.slice(6));
+
+                if (event.type === 'sources') {
+                    pendingSources = event.data;
+                } else if (event.type === 'token') {
+                    fullAnswer += event.data;
+                    messageDiv.querySelector('.message-content').innerHTML = marked.parse(fullAnswer);
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                } else if (event.type === 'full') {
+                    // Fallback: received complete response at once
+                    fullAnswer = event.data;
+                    messageDiv.querySelector('.message-content').innerHTML = marked.parse(fullAnswer);
+                } else if (event.type === 'done') {
+                    if (!currentSessionId) currentSessionId = event.data.session_id;
+                    // Add sources collapse section
+                    if (event.data.sources && event.data.sources.length > 0) {
+                        addSourcesToMessage(messageDiv, event.data.sources);
+                    }
+                } else if (event.type === 'error') {
+                    messageDiv.querySelector('.message-content').innerHTML = `<span style="color:red;">Error: ${event.data}</span>`;
+                }
+            }
         }
-
-        // Replace loading message with response
-        loadingMessage.remove();
-        addMessage(data.answer, 'assistant', data.sources);
-
     } catch (error) {
-        // Replace loading message with error
-        loadingMessage.remove();
-        addMessage(`Error: ${error.message}`, 'assistant');
+        messageDiv.querySelector('.message-content').innerHTML = `<span style="color:red;">Error: ${error.message}</span>`;
     } finally {
         chatInput.disabled = false;
         sendButton.disabled = false;
@@ -95,19 +120,32 @@ async function sendMessage() {
     }
 }
 
-function createLoadingMessage() {
+function createStreamingAssistantMessage() {
     const messageDiv = document.createElement('div');
     messageDiv.className = 'message assistant';
-    messageDiv.innerHTML = `
-        <div class="message-content">
-            <div class="loading">
-                <span></span>
-                <span></span>
-                <span></span>
-            </div>
-        </div>
-    `;
+    messageDiv.innerHTML = `<div class="message-content"><span class="loading"><span></span><span></span><span></span></span></div>`;
     return messageDiv;
+}
+
+function addSourcesToMessage(messageDiv, sources) {
+    const sourceLinks = sources.map(source => {
+        const { displayText, url } = parseSource(source);
+        if (url) {
+            return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="source-link">${escapeHtml(displayText)}</a>`;
+        }
+        return `<span class="source-item">${escapeHtml(displayText)}</span>`;
+    });
+
+    const details = document.createElement('details');
+    details.className = 'sources-collapsible';
+    details.innerHTML = `<summary class="sources-header">Sources</summary><div class="sources-content">${sourceLinks.join('')}</div>`;
+    messageDiv.appendChild(details);
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 function addMessage(content, type, sources = null, isWelcome = false) {
@@ -115,33 +153,48 @@ function addMessage(content, type, sources = null, isWelcome = false) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `message ${type}${isWelcome ? ' welcome-message' : ''}`;
     messageDiv.id = `message-${messageId}`;
-    
+
     // Convert markdown to HTML for assistant messages
     const displayContent = type === 'assistant' ? marked.parse(content) : escapeHtml(content);
-    
+
     let html = `<div class="message-content">${displayContent}</div>`;
-    
+
     if (sources && sources.length > 0) {
+        // Parse sources and create clickable links
+        const sourceLinks = sources.map(source => {
+            const { displayText, url } = parseSource(source);
+            if (url) {
+                // Create clickable link that opens in new tab
+                return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="source-link">${escapeHtml(displayText)}</a>`;
+            }
+            // No URL available - display as plain text
+            return `<span class="source-item">${escapeHtml(displayText)}</span>`;
+        });
+
         html += `
             <details class="sources-collapsible">
                 <summary class="sources-header">Sources</summary>
-                <div class="sources-content">${sources.join(', ')}</div>
+                <div class="sources-content">${sourceLinks.join('')}</div>
             </details>
         `;
     }
-    
+
     messageDiv.innerHTML = html;
     chatMessages.appendChild(messageDiv);
     chatMessages.scrollTop = chatMessages.scrollHeight;
-    
+
     return messageId;
 }
 
-// Helper function to escape HTML for user messages
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+// Parse source string to extract display text and URL
+// Format: "Course Title - Lesson N|||URL" or just "Course Title - Lesson N"
+function parseSource(source) {
+    const separator = '|||';
+    if (source.includes(separator)) {
+        const parts = source.split(separator);
+        return { displayText: parts[0], url: parts[1] };
+    }
+    return { displayText: source, url: null };
 }
 
 // Removed removeMessage function - no longer needed since we handle loading differently
