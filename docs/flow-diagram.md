@@ -6,91 +6,130 @@
 flowchart TD
     subgraph Frontend["前端 (frontend/)"]
         A[用户输入问题] --> B[script.js: sendMessage]
-        B --> C[POST /api/query]
+        B --> C[POST /api/query/stream (SSE)]
     end
 
     subgraph Backend["后端 (backend/)"]
-        D[app.py: query_documents] --> E[rag_system.py: query]
-        E --> F[session_manager: 获取历史]
-        F --> G[ai_generator.py: generate_response]
-        
-        subgraph Claude["Claude API 调用"]
-            G --> H{Claude 分析}
-            H -->|需要搜索| I[tool_use: search_course_content]
-            H -->|无需搜索| J[直接生成回答]
-            
-            I --> K[search_tools.py: execute]
-            K --> L[vector_store.py: search]
-            L --> M[ChromaDB 语义搜索]
-            M --> N[返回相关文档]
-            N --> O[tool_result 返回 Claude]
-            O --> P[Claude 生成最终回答]
-        end
-        
-        J --> Q[返回回答]
-        P --> Q
-        Q --> R[session_manager: 更新历史]
-        R --> S[获取 sources]
+        D[app.py: query_stream] --> E[vector_store.py: search]
+        E --> F[ChromaDB 语义搜索]
+        F --> G[返回相关文档]
+        G --> H[rag_system.py: _format_search_results]
+        H --> I[格式化 context + sources]
+        I --> J[ai_generator.py: generate_response_with_context]
+        J --> K{流式输出}
+        K -->|token| L[SSE event: token]
+        K -->|完成| M[SSE event: done]
+        K -->|异常| N[SSE event: error]
     end
 
     C --> D
-    S --> T[JSON Response]
-    
-    subgraph Frontend2["前端显示"]
-        T --> U[显示 AI 回答]
-        T --> V[显示来源 Sources]
-    end
+    L --> O[前端实时更新回答]
+    M --> P[显示来源 Sources]
+    N --> Q[显示错误信息]
 
     style Frontend fill:#e1f5fe
     style Backend fill:#fff3e0
-    style Claude fill:#f3e5f5
+```
+
+## 非流式备用流程
+
+```mermaid
+flowchart TD
+    A[POST /api/query] --> B[app.py: query_documents]
+    B --> C[rag_system.py: query]
+    C --> D{响应缓存?}
+    D -->|命中| E[直接返回缓存结果]
+    D -->|未命中| F[vector_store: search]
+    F --> G[_format_search_results]
+    G --> H[ai_generator: generate_response_with_context]
+    H --> I[Claude API 单次调用]
+    I --> J[更新对话历史 + 缓存结果]
+    J --> K[返回 answer + sources]
+
+    style D fill:#fff9c4
+    style E fill:#c8e6c9
 ```
 
 ## 数据流详解
+
+### 流式查询（主路径）
 
 ```mermaid
 sequenceDiagram
     participant U as 用户
     participant F as Frontend (script.js)
-    participant API as FastAPI (app.py)
-    participant RAG as RAGSystem
-    participant SM as SessionManager
-    participant AI as AIGenerator
-    participant Claude as Claude API
-    participant Tool as SearchTool
+    participant API as FastAPI (app.py query_stream)
     participant VS as VectorStore
     participant DB as ChromaDB
+    participant RS as RAGSystem (_format_search_results)
+    participant AI as AIGenerator
+    participant Claude as Claude API
+
+    U->>F: 输入问题
+    F->>API: POST /api/query/stream {query, session_id}
+
+    API->>API: 发送 SSE sources 事件
+
+    API->>VS: search(query)
+    VS->>DB: course_content.query(query_texts, n_results, where)
+    DB-->>VS: 相关文档块
+    VS-->>API: SearchResults
+
+    API->>RS: _format_search_results(results)
+    RS-->>API: (context_str, sources_list)
+
+    API->>AI: generate_streaming_with_context(query, context, history)
+    AI->>Claude: messages.stream (system+context+query)
+
+    loop 流式输出
+        Claude-->>AI: text_chunk
+        AI-->>API: yield text_chunk
+        API-->>F: SSE event: token
+    end
+
+    Claude-->>AI: 完成
+    API->>API: 发送 SSE done 事件 (含 session_id, answer, sources)
+
+    F->>U: 实时渲染回答 + 可点击来源链接
+```
+
+### 非流式查询（备用路径）
+
+```mermaid
+sequenceDiagram
+    participant U as 用户
+    participant F as Frontend (script.js)
+    participant API as FastAPI (app.py query_documents)
+    participant RS as RAGSystem (query)
+    participant Cache as 响应缓存
+    participant VS as VectorStore
+    participant AI as AIGenerator
+    participant SM as SessionManager
+    participant Claude as Claude API
 
     U->>F: 输入问题
     F->>API: POST /api/query {query, session_id}
-    API->>RAG: query(query, session_id)
-    
-    RAG->>SM: get_conversation_history(session_id)
-    SM-->>RAG: 返回对话历史 (或 null)
-    
-    RAG->>AI: generate_response(query, history, tools)
-    AI->>Claude: messages.create (带 tools)
-    
-    alt Claude 决定搜索
-        Claude-->>AI: stop_reason = "tool_use"
-        AI->>Tool: execute_tool("search_course_content", params)
-        Tool->>VS: search(query, course_name, lesson_number)
-        VS->>DB: query(query_texts, n_results, where)
-        DB-->>VS: 相关文档块
-        VS-->>Tool: SearchResults
-        Tool-->>AI: 格式化的搜索结果
-        AI->>Claude: messages.create (带 tool_result)
-        Claude-->>AI: 最终回答
-    else Claude 直接回答
-        Claude-->>AI: 直接返回文本回答
+    API->>API: asyncio.to_thread(RAGSystem.query)
+
+    RS->>Cache: 检查缓存 (query.lower())
+    alt 缓存命中
+        Cache-->>RS: 返回 (answer, sources)
+    else 缓存未命中
+        RS->>VS: search(query)
+        VS-->>RS: SearchResults
+        RS->>RS: _format_search_results → (context, sources)
+        RS->>SM: get_conversation_history(session_id)
+        SM-->>RS: 对话历史
+
+        RS->>AI: generate_response_with_context(query, context, history)
+        AI->>Claude: messages.create (system+context+query)
+        Claude-->>AI: 完整回答
+
+        RS->>SM: add_exchange(session_id, query, answer)
+        RS->>Cache: 缓存结果
     end
-    
-    AI-->>RAG: 回答文本
-    RAG->>Tool: get_last_sources()
-    Tool-->>RAG: sources 列表
-    RAG->>SM: add_exchange(session_id, query, answer)
-    
-    RAG-->>API: (answer, sources)
+
+    RS-->>API: (answer, sources)
     API-->>F: JSON {answer, sources, session_id}
     F->>U: 显示回答 + 来源
 ```
@@ -115,10 +154,11 @@ graph LR
         SM[session_manager.py]
         CFG[config.py]
         MDL[models.py]
+        TEST[test_query.py]
     end
 
     subgraph external["外部服务"]
-        CLAude[Claude API]
+        CLAUDE[Claude API / 自定义代理]
         CHROMA[ChromaDB]
         ST2[SentenceTransformer]
     end
@@ -131,27 +171,28 @@ graph LR
     end
 
     HTML --> JS
-    JS --> APP
-    
+    JS -->|SSE /api/query/stream| APP
+    JS -->|POST /api/query| APP
+
     APP --> RAG
     RAG --> AI
     RAG --> VS
     RAG --> SM
-    RAG --> ST
     RAG --> DP
-    
+    RAG -.缓存.-> RAG
+
     AI --> CFG
-    AI --> CLAude
-    
+    AI --> CLAUDE
+
     VS --> CFG
     VS --> MDL
     VS --> CHROMA
     VS --> ST2
-    
+
     ST --> VS
     DP --> MDL
     SM --> CFG
-    
+
     DP --> docs
 
     style frontend fill:#bbdefb
@@ -164,15 +205,28 @@ graph LR
 
 ```mermaid
 flowchart LR
-    A[run.sh] --> B[uvicorn app:app]
-    B --> C[FastAPI 启动]
-    C --> D[startup_event]
-    D --> E[RAGSystem 初始化]
-    E --> F[加载 docs/ 文档]
-    F --> G[DocumentProcessor 处理]
-    G --> H[VectorStore 存储]
-    H --> I[系统就绪]
-    
-    I --> J[用户访问 localhost:8000]
-    J --> K[返回 index.html]
+    A[uvicorn app:app] --> B[FastAPI 启动]
+    B --> C[startup_event]
+    C --> D[RAGSystem 初始化]
+    D --> E[VectorStore: 加载课程标题索引]
+    D --> F[AIGenerator: 连接 Claude API]
+    E --> G[加载 docs/ 文档]
+    G --> H[DocumentProcessor 处理]
+    H --> I[VectorStore 存储到 ChromaDB]
+    I --> J[系统就绪]
+
+    J --> K[用户访问 localhost:8000]
+    K --> L[返回 index.html + 前端加载]
 ```
+
+## 关键架构变更说明
+
+| 变更 | 原实现 | 新实现 |
+|------|--------|--------|
+| 查询方式 | Tool-use 循环 (2次API调用) | 预搜索 + 单次API调用 |
+| 前端请求 | POST /api/query (同步) | POST /api/query/stream (SSE流式) |
+| 响应缓存 | 无 | RAGSystem 内置 LRU 缓存 |
+| 来源链接 | 纯文本 | `|||` 分隔嵌入URL，前端渲染为可点击链接 |
+| 课程名解析 | 纯向量搜索 | 精确匹配 → 子串匹配 → 向量搜索 (三级) |
+| 自定义代理 | 不支持 | config.py 支持 ANTHROPIC_BASE_URL |
+| 流式异常处理 | HTTP 500 | SSE error 事件 |
