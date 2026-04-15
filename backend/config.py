@@ -14,6 +14,14 @@ class Config:
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
     ANTHROPIC_BASE_URL: str = os.getenv("ANTHROPIC_BASE_URL", None)
     ANTHROPIC_MODEL: str = os.getenv("ANTHROPIC_MODEL", "glm-5")
+
+    # Auth settings
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
+    SESSION_EXPIRE_SECONDS: int = 86400  # 24 hours
+
+    # Default admin user (change password after first login)
+    DEFAULT_ADMIN_USERNAME: str = "admin"
+    DEFAULT_ADMIN_PASSWORD: str = "admin123"
     
     # Embedding model settings
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"

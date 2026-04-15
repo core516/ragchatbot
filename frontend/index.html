@@ -7,13 +7,81 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>Course Materials Assistant</title>
-    <link rel="stylesheet" href="style.css?v=13">
+    <link rel="stylesheet" href="style.css?v=14">
 </head>
 <body>
+    <!-- Login Overlay -->
+    <div id="loginOverlay" class="login-overlay">
+        <div class="login-container">
+            <h2>Login</h2>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label for="loginUsername">Username</label>
+                    <input type="text" id="loginUsername" required autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="loginPassword">Password</label>
+                    <input type="password" id="loginPassword" required autocomplete="current-password">
+                </div>
+                <div class="form-group">
+                    <label>Security Check</label>
+                    <div class="captcha-container">
+                        <div class="captcha-track" id="captchaTrack">
+                            <div class="captcha-handle" id="captchaHandle">
+                                <span class="captcha-arrow">&rarr;</span>
+                            </div>
+                            <span class="captcha-text">Slide to verify</span>
+                        </div>
+                    </div>
+                </div>
+                <div id="loginError" class="login-error"></div>
+                <button type="submit" id="loginBtn">Login</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Change Password Modal -->
+    <div id="passwordModal" class="modal">
+        <div class="modal-content">
+            <h3>Change Password</h3>
+            <form id="changePasswordForm">
+                <div class="form-group">
+                    <label for="oldPassword">Current Password</label>
+                    <input type="password" id="oldPassword" required>
+                </div>
+                <div class="form-group">
+                    <label for="newPassword">New Password</label>
+                    <input type="password" id="newPassword" required>
+                </div>
+                <div class="form-group">
+                    <label for="confirmPassword">Confirm New Password</label>
+                    <input type="password" id="confirmPassword" required>
+                </div>
+                <div id="passwordError" class="login-error"></div>
+                <div class="modal-buttons">
+                    <button type="button" id="cancelPasswordBtn" class="btn-secondary">Cancel</button>
+                    <button type="submit" class="btn-primary">Change</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <div class="container">
         <header>
             <h1>Course Materials Assistant</h1>
             <p class="subtitle">Ask questions about courses, instructors, and content</p>
+            <!-- User Menu -->
+            <div class="user-menu" id="userMenu" style="display: none;">
+                <button class="user-menu-btn" id="userMenuBtn">
+                    <span class="user-icon">&#128100;</span>
+                    <span id="headerUsername"></span>
+                    <span class="dropdown-arrow">&#9662;</span>
+                </button>
+                <div class="user-dropdown" id="userDropdown">
+                    <button id="changePasswordBtn">Change Password</button>
+                    <button id="logoutBtn">Logout</button>
+                </div>
+            </div>
         </header>
 
         <!-- Status Bar -->
@@ -82,6 +150,7 @@
 
 
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="script.js?v=13"></script>
+    <script src="auth_functions.js?v=1"></script>
+    <script src="script.js?v=14"></script>
 </body>
 </html>

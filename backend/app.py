@@ -14,6 +14,7 @@ import os
 
 from config import config
 from rag_system import RAGSystem
+import auth as auth_module
 
 # Initialize FastAPI app
 app = FastAPI(title="Course Materials RAG System", root_path="")
@@ -56,7 +57,67 @@ class CourseStats(BaseModel):
     total_courses: int
     course_titles: List[str]
 
+class LoginRequest(BaseModel):
+    """Request model for login"""
+    username: str
+    password: str
+
+class LoginResponse(BaseModel):
+    """Response model for login"""
+    success: bool
+    message: str
+    username: Optional[str] = None
+    session_token: Optional[str] = None
+
+class ChangePasswordRequest(BaseModel):
+    """Request model for change password"""
+    old_password: str
+    new_password: str
+
 # API Endpoints
+
+# Auth endpoints
+@app.post("/api/auth/login", response_model=LoginResponse)
+async def login(request: LoginRequest):
+    """Authenticate user and create session."""
+    # Initialize default user
+    auth_module.init_default_user()
+
+    session_token = auth_module.login(request.username, request.password)
+    if session_token:
+        return LoginResponse(
+            success=True,
+            message="Login successful",
+            username=request.username,
+            session_token=session_token
+        )
+    else:
+        return LoginResponse(
+            success=False,
+            message="Invalid username or password"
+        )
+
+@app.post("/api/auth/logout")
+async def logout(session_token: str):
+    """Logout user."""
+    auth_module.logout(session_token)
+    return {"success": True}
+
+@app.post("/api/auth/change-password")
+async def change_password(request: ChangePasswordRequest, session_token: str, username: str):
+    """Change user password."""
+    success = auth_module.change_password(username, request.old_password, request.new_password)
+    if success:
+        return {"success": True, "message": "Password changed successfully"}
+    return {"success": False, "message": "Invalid old password"}
+
+@app.get("/api/auth/me")
+async def get_current_user(session_token: str):
+    """Get current user info."""
+    username = auth_module.verify_session(session_token)
+    if username:
+        return {"authenticated": True, "username": username}
+    return {"authenticated": False}
 
 @app.post("/api/query", response_model=QueryResponse)
 async def query_documents(request: QueryRequest):
