@@ -497,36 +497,42 @@ async function handleChangePassword(e) {
 
 // Slider Captcha
 function setupCaptcha() {
+    if (!captchaTrack || !captchaHandle) {
+        console.error('Captcha elements not found');
+        return;
+    }
+
     let isDragging = false;
     let startX = 0;
-    let startLeft = 0;
-    const trackWidth = captchaTrack.offsetWidth;
-    const handleWidth = captchaHandle.offsetWidth;
-    const maxLeft = trackWidth - handleWidth - 8;
+    let startLeft = 4;
 
-    captchaHandle.addEventListener('mousedown', startDrag);
-    captchaTrack.addEventListener('click', (e) => {
-        if (!captchaCompleted) {
-            const rect = captchaTrack.getBoundingClientRect();
-            const clickX = e.clientX - rect.left;
-            const targetLeft = Math.min(Math.max(clickX - handleWidth / 2, 0), maxLeft);
-            animateToPosition(targetLeft, true);
-        }
-    });
+    function updateDimensions() {
+        return {
+            trackWidth: captchaTrack.offsetWidth,
+            handleWidth: captchaHandle.offsetWidth,
+            maxLeft: captchaTrack.offsetWidth - captchaHandle.offsetWidth - 8
+        };
+    }
 
     function startDrag(e) {
         if (captchaCompleted) return;
+        e.preventDefault();
         isDragging = true;
-        startX = e.clientX;
+        startX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
         startLeft = parseInt(captchaHandle.style.left) || 4;
         captchaHandle.classList.add('dragging');
         document.addEventListener('mousemove', onDrag);
         document.addEventListener('mouseup', stopDrag);
+        document.addEventListener('touchmove', onDrag);
+        document.addEventListener('touchend', stopDrag);
     }
 
     function onDrag(e) {
         if (!isDragging) return;
-        const deltaX = e.clientX - startX;
+        e.preventDefault();
+        const currentX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
+        const { maxLeft } = updateDimensions();
+        const deltaX = currentX - startX;
         let newLeft = startLeft + deltaX;
         newLeft = Math.min(Math.max(newLeft, 4), maxLeft);
         captchaHandle.style.left = newLeft + 'px';
@@ -538,41 +544,26 @@ function setupCaptcha() {
         captchaHandle.classList.remove('dragging');
         document.removeEventListener('mousemove', onDrag);
         document.removeEventListener('mouseup', stopDrag);
+        document.removeEventListener('touchmove', onDrag);
+        document.removeEventListener('touchend', stopDrag);
 
+        const { maxLeft } = updateDimensions();
         const currentLeft = parseInt(captchaHandle.style.left) || 4;
         if (currentLeft >= maxLeft - 5) {
-            completeCaptcha();
+            completeCaptcha(maxLeft);
         } else {
             captchaHandle.style.left = '4px';
         }
     }
 
-    function animateToPosition(targetLeft, complete) {
-        const startLeft = parseInt(captchaHandle.style.left) || 4;
-        const duration = 300;
-        const startTime = Date.now();
-
-        function animate() {
-            const elapsed = Date.now() - startTime;
-            const progress = Math.min(elapsed / duration, 1);
-            const current = startLeft + (targetLeft - startLeft) * progress;
-            captchaHandle.style.left = current + 'px';
-
-            if (progress < 1) {
-                requestAnimationFrame(animate);
-            } else if (complete) {
-                completeCaptcha();
-            }
-        }
-        animate();
-    }
-
-    function completeCaptcha() {
+    function completeCaptcha(maxLeft) {
+        if (!maxLeft) { maxLeft = updateDimensions().maxLeft; }
         captchaCompleted = true;
         captchaHandle.style.left = maxLeft + 'px';
         captchaHandle.classList.add('completed');
         captchaTrack.classList.add('completed');
-        captchaHandle.querySelector('.captcha-arrow').innerHTML = '✓';
+        const arrow = captchaHandle.querySelector('.captcha-arrow');
+        if (arrow) arrow.innerHTML = '✓';
     }
 
     function resetCaptcha() {
@@ -580,6 +571,25 @@ function setupCaptcha() {
         captchaHandle.style.left = '4px';
         captchaHandle.classList.remove('completed');
         captchaTrack.classList.remove('completed');
-        captchaHandle.querySelector('.captcha-arrow').innerHTML = '→';
+        const arrow = captchaHandle.querySelector('.captcha-arrow');
+        if (arrow) arrow.innerHTML = '→';
     }
+
+    // Add event listeners - support both mouse and touch
+    captchaHandle.addEventListener('mousedown', startDrag);
+    captchaHandle.addEventListener('touchstart', startDrag, { passive: false });
+
+    // Click on track to jump
+    captchaTrack.addEventListener('click', (e) => {
+        if (captchaCompleted) return;
+        const { maxLeft } = updateDimensions();
+        const rect = captchaTrack.getBoundingClientRect();
+        const clickX = e.clientX - rect.left;
+        const handleWidth = captchaHandle.offsetWidth;
+        const targetLeft = Math.min(Math.max(clickX - handleWidth / 2, 0), maxLeft);
+        captchaHandle.style.left = targetLeft + 'px';
+        if (targetLeft >= maxLeft - 5) {
+            completeCaptcha(maxLeft);
+        }
+    });
 }
