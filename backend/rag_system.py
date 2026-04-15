@@ -159,6 +159,23 @@ class RAGSystem:
 
         return response, sources
 
+    def _sort_sources(self, sources: List[str]) -> List[str]:
+        """Sort sources by course name (asc), then lesson number (asc).
+        Source format: 'Course - Lesson N|||url' or 'Course - Lesson N'."""
+        import re
+
+        def sort_key(s):
+            # Extract course name (everything before ' - Lesson')
+            lesson_match = re.search(r'^(.+?)\s+-\s+Lesson\s+(\d+)', s)
+            if lesson_match:
+                course_name = lesson_match.group(1).strip().lower()
+                lesson_num = int(lesson_match.group(2))
+                return (course_name, lesson_num)
+            # Fallback: no lesson info, sort alphabetically
+            return (s.lower(), float('inf'))
+
+        return sorted(sources, key=sort_key)
+
     def _format_search_results(self, results) -> Tuple[str, List[str]]:
         """Format search results into context string and sources list."""
         context_parts = []
@@ -186,7 +203,7 @@ class RAGSystem:
 
             sources.append(source)
 
-        return "\n\n".join(context_parts), sources
+        return "\n\n".join(context_parts), self._sort_sources(sources)
     
     def get_course_analytics(self) -> Dict:
         """Get analytics about the course catalog"""

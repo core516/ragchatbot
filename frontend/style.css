@@ -241,42 +241,40 @@ header h1 {
 }
 
 .sources-content {
-    padding: 0 0.5rem 0.25rem 1.5rem;
-    color: var(--text-secondary);
+    padding: 0.5rem 0 0.5rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+/* Numbered source list */
+.sources-content .source-list {
+    list-style: none;
+    counter-reset: source-counter;
+    margin: 0;
+    padding: 0;
+}
+
+.sources-content .source-list li {
+    margin: 0.4rem 0;
 }
 
 /* Clickable source links */
-.sources-content .source-link {
-    display: inline-block;
+.sources-content .source-list a {
     color: var(--primary-color);
     text-decoration: none;
-    padding: 0.25rem 0.5rem;
-    margin: 0.15rem;
-    background: rgba(37, 99, 235, 0.1);
-    border-radius: 4px;
     transition: all 0.2s ease;
     font-size: 0.85rem;
-}
-
-.sources-content .source-link:hover {
-    background: rgba(37, 99, 235, 0.2);
-    text-decoration: underline;
-}
-
-.sources-content .source-link:focus {
-    outline: 2px solid var(--primary-color);
-    outline-offset: 2px;
-}
-
-/* Non-clickable source items (no link available) */
-.sources-content .source-item {
-    display: inline-block;
-    color: var(--text-secondary);
-    padding: 0.25rem 0.5rem;
-    margin: 0.15rem;
-    background: rgba(148, 163, 184, 0.1);
+    line-height: 1.4;
+    display: block;
+    padding: 0.35rem 0.5rem;
     border-radius: 4px;
-    font-size: 0.85rem;
+    background: rgba(37, 99, 235, 0.08);
+}
+
+.sources-content .source-list a:hover {
+    background: rgba(37, 99, 235, 0.18);
+    text-decoration: underline;
 }
 
 /* Markdown formatting styles */

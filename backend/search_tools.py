@@ -1,3 +1,4 @@
+import re
 from typing import Dict, Any, Optional, Protocol
 from abc import ABC, abstractmethod
 from vector_store import VectorStore, SearchResults
@@ -115,10 +116,24 @@ class CourseSearchTool(Tool):
             
             formatted.append(f"{header}\n{doc}")
         
-        # Store sources for retrieval
-        self.last_sources = sources
-        
+        # Store sorted sources for retrieval
+        self.last_sources = self._sort_sources(sources)
+
         return "\n\n".join(formatted)
+
+    def _sort_sources(self, sources: list) -> list:
+        """Sort sources by course name (asc), then lesson number (asc).
+        Source format: 'Course - Lesson N|||url' or 'Course - Lesson N'."""
+        def sort_key(s):
+            lesson_match = re.search(r'^(.+?)\s+-\s+Lesson\s+(\d+)', s)
+            if lesson_match:
+                course_name = lesson_match.group(1).strip().lower()
+                lesson_num = int(lesson_match.group(2))
+                return (course_name, lesson_num)
+            return (s.lower(), float('inf'))
+
+        return sorted(sources, key=sort_key)
+
 
 class ToolManager:
     """Manages available tools for the AI"""

@@ -94,11 +94,12 @@ async function sendMessage() {
                     pendingSources = event.data;
                 } else if (event.type === 'token') {
                     fullAnswer += event.data;
-                    messageDiv.querySelector('.message-content').innerHTML = marked.parse(fullAnswer);
+                    const cleaned = cleanAnswerText(fullAnswer);
+                    messageDiv.querySelector('.message-content').innerHTML = marked.parse(cleaned);
                     chatMessages.scrollTop = chatMessages.scrollHeight;
                 } else if (event.type === 'full') {
                     // Fallback: received complete response at once
-                    fullAnswer = event.data;
+                    fullAnswer = cleanAnswerText(event.data);
                     messageDiv.querySelector('.message-content').innerHTML = marked.parse(fullAnswer);
                 } else if (event.type === 'done') {
                     if (!currentSessionId) currentSessionId = event.data.session_id;
@@ -128,17 +129,21 @@ function createStreamingAssistantMessage() {
 }
 
 function addSourcesToMessage(messageDiv, sources) {
-    const sourceLinks = sources.map(source => {
+    // Deduplicate sources
+    const unique = [...new Set(sources.map(s => s.split('|||')[0]))];
+    const deduped = unique.map(key => sources.find(s => s.split('|||')[0] === key));
+
+    const sourceItems = deduped.map((source, i) => {
         const { displayText, url } = parseSource(source);
         if (url) {
-            return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="source-link">${escapeHtml(displayText)}</a>`;
+            return `<li><a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${i + 1}. ${escapeHtml(displayText)}</a></li>`;
         }
-        return `<span class="source-item">${escapeHtml(displayText)}</span>`;
+        return `<li>${i + 1}. ${escapeHtml(displayText)}</li>`;
     });
 
     const details = document.createElement('details');
     details.className = 'sources-collapsible';
-    details.innerHTML = `<summary class="sources-header">Sources</summary><div class="sources-content">${sourceLinks.join('')}</div>`;
+    details.innerHTML = `<summary class="sources-header">Sources (${deduped.length})</summary><div class="sources-content"><ol class="source-list">${sourceItems.join('')}</ol></div>`;
     messageDiv.appendChild(details);
 }
 
@@ -160,21 +165,22 @@ function addMessage(content, type, sources = null, isWelcome = false) {
     let html = `<div class="message-content">${displayContent}</div>`;
 
     if (sources && sources.length > 0) {
-        // Parse sources and create clickable links
-        const sourceLinks = sources.map(source => {
+        // Deduplicate by display text
+        const unique = [...new Set(sources.map(s => s.split('|||')[0]))];
+        const deduped = unique.map(key => sources.find(s => s.split('|||')[0] === key));
+
+        const sourceItems = deduped.map((source, i) => {
             const { displayText, url } = parseSource(source);
             if (url) {
-                // Create clickable link that opens in new tab
-                return `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" class="source-link">${escapeHtml(displayText)}</a>`;
+                return `<li><a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${i + 1}. ${escapeHtml(displayText)}</a></li>`;
             }
-            // No URL available - display as plain text
-            return `<span class="source-item">${escapeHtml(displayText)}</span>`;
+            return `<li>${i + 1}. ${escapeHtml(displayText)}</li>`;
         });
 
         html += `
             <details class="sources-collapsible">
-                <summary class="sources-header">Sources</summary>
-                <div class="sources-content">${sourceLinks.join('')}</div>
+                <summary class="sources-header">Sources (${deduped.length})</summary>
+                <div class="sources-content"><ol class="source-list">${sourceItems.join('')}</div>
             </details>
         `;
     }
@@ -195,6 +201,25 @@ function parseSource(source) {
         return { displayText: parts[0], url: parts[1] };
     }
     return { displayText: source, url: null };
+}
+
+// Clean up raw "|||url" source references from LLM answer text.
+// The LLM sometimes echoes context lines like "Course Title - Lesson N|||URL" back in its response.
+function cleanAnswerText(text) {
+    // Match lines containing |||https:// and remove the entire line
+    return text
+        .replace(/[^\n]*\|\|\|https?:\/\/[^\s\n]+[^\n]*/g, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+}
+
+// Replace inline source references in answer text with clickable markdown links.
+// Handles both "Title - Lesson N|||URL" and "Title - Lesson N" formats.
+function formatSourcesInAnswer(text) {
+    return text.replace(/(.+?)\s+\|\|\|\s*([^\s]+)/g, (_, displayText, url) => {
+        return `[${displayText}](${url})`;
+    });
 }
 
 // Removed removeMessage function - no longer needed since we handle loading differently
