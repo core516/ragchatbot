@@ -563,7 +563,7 @@ function setupCaptcha() {
         captchaHandle.classList.add('completed');
         captchaTrack.classList.add('completed');
         const arrow = captchaHandle.querySelector('.captcha-arrow');
-        if (arrow) arrow.innerHTML = '✓';
+        if (arrow) arrow.innerHTML = '&#x2713;'; // ✓
     }
 
     // Expose resetCaptcha globally
@@ -573,7 +573,7 @@ function setupCaptcha() {
         captchaHandle.classList.remove('completed');
         captchaTrack.classList.remove('completed');
         const arrow = captchaHandle.querySelector('.captcha-arrow');
-        if (arrow) arrow.innerHTML = '→';
+        if (arrow) arrow.innerHTML = '&#x2192;'; // →
     };
 
     // Add event listeners - support both mouse and touch
