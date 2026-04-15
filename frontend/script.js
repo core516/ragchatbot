@@ -573,7 +573,7 @@ function setupCaptcha() {
         captchaHandle.classList.remove('completed');
         captchaTrack.classList.remove('completed');
         const arrow = captchaHandle.querySelector('.captcha-arrow');
-        if (arrow) arrow.innerHTML = '&#x2192;'; // →
+        if (arrow) arrow.innerHTML = '&#x2630;'; // ☰
     };
 
     // Add event listeners - support both mouse and touch
