@@ -566,14 +566,15 @@ function setupCaptcha() {
         if (arrow) arrow.innerHTML = '✓';
     }
 
-    function resetCaptcha() {
+    // Expose resetCaptcha globally
+    window.resetCaptcha = function() {
         captchaCompleted = false;
         captchaHandle.style.left = '4px';
         captchaHandle.classList.remove('completed');
         captchaTrack.classList.remove('completed');
         const arrow = captchaHandle.querySelector('.captcha-arrow');
         if (arrow) arrow.innerHTML = '→';
-    }
+    };
 
     // Add event listeners - support both mouse and touch
     captchaHandle.addEventListener('mousedown', startDrag);
