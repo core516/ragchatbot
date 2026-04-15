@@ -5,7 +5,7 @@ const API_URL = '/api';
 let currentSessionId = null;
 
 // DOM elements
-let chatMessages, chatInput, sendButton, totalCourses, courseTitles;
+let chatMessages, chatInput, sendButton, totalCourses, courseTitles, modelName;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -15,10 +15,12 @@ document.addEventListener('DOMContentLoaded', () => {
     sendButton = document.getElementById('sendButton');
     totalCourses = document.getElementById('totalCourses');
     courseTitles = document.getElementById('courseTitles');
+    modelName = document.getElementById('modelName');
     
     setupEventListeners();
     createNewSession();
     loadCourseStats();
+    loadModelConfig();
 });
 
 // Event Listeners
@@ -264,6 +266,23 @@ async function loadCourseStats() {
         }
         if (courseTitles) {
             courseTitles.innerHTML = '<span class="error">Failed to load courses</span>';
+        }
+    }
+}
+
+// Load model configuration
+async function loadModelConfig() {
+    try {
+        const response = await fetch(`${API_URL}/config`);
+        if (!response.ok) throw new Error('Failed to load config');
+        const data = await response.json();
+        if (modelName) {
+            modelName.textContent = data.model || 'Unknown';
+        }
+    } catch (error) {
+        console.error('Error loading model config:', error);
+        if (modelName) {
+            modelName.textContent = 'Error';
         }
     }
 }

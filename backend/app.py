@@ -147,6 +147,14 @@ async def get_course_stats():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/config")
+async def get_config():
+    """Get current configuration including model"""
+    return {
+        "model": rag_system.ai_generator.model,
+        "base_url": str(rag_system.ai_generator.client._base_url) if rag_system.ai_generator.client else None
+    }
+
 @app.on_event("startup")
 async def startup_event():
     """Load initial documents on startup"""
